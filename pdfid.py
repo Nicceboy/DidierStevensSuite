@@ -59,7 +59,7 @@ Todo:
   - update XML example (entropy, EOF)
   - code review, cleanup
 """
-
+import hashlib
 import optparse
 import os
 import re
@@ -715,6 +715,25 @@ class cPDFiD():
         self.colors_gt_2_24 = self.keywords['/Colors > 2^24']
 
 def Print(lines, options):
+    if options.json:
+        # In addition of creating the file, add SHA256 meta information for results
+        # make directory pdfid-json for output files
+        dirName = 'pdfid-json'
+        if not os.path.exists(dirName):
+            os.mkdir(dirName)
+        json_load = json.loads(lines)
+        # sample_filename = os.path.basename(json_load.get("pdfid").get("filename"))
+        sample_path = json_load.get("pdfid").get("filename")
+        with open(sample_path, "rb",
+                buffering=0) as f:
+            bytes = f.read()  # read entire file as bytes
+            readable_hash = hashlib.sha256(bytes).hexdigest()
+        json_load["pdfid"]["FileSHA256"] = readable_hash
+        output_filename = "pdfidSHA256-%s.json" % readable_hash
+        json_outputfile = open(os.path.join(dirName, output_filename), "w")
+        json_outputfile.write(json.dumps(json_load, indent=4))
+        print("Result file %s generated." % output_filename)
+        return
     print(lines)
     filename = None
     if options.scan:
@@ -739,8 +758,12 @@ def MakeCSVLine(fields, separator=';', quote='"'):
 
 def ProcessFile(filename, options, plugins):
     xmlDoc = PDFiD(filename, options.all, options.extra, options.disarm, options.force)
-    if plugins == [] and options.select == '':
+
+    if plugins == [] and options.select == '' and options.json is False:
         Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
+        return
+    if plugins == [] and options.select == '' and options.json is True:
+        Print(PDFiD2JSON(xmlDoc, options.force), options)
         return
 
     oPDFiD = cPDFiD(xmlDoc, options.force)
@@ -755,11 +778,14 @@ def ProcessFile(filename, options, plugins):
                     raise e
                 return
             if selected:
-                if options.csv:
+                if options.csv and not options.json:
                     Print(filename, options)
+                elif options.json and not options.csv:
+                    Print(PDFiD2JSON(xmlDoc, options.force), options)
                 else:
                     Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
     else:
+        plugins_data = []
         for cPlugin in plugins:
             if not cPlugin.onlyValidPDF or not oPDFiD.errorOccured and oPDFiD.isPDF:
                 try:
@@ -781,6 +807,19 @@ def ProcessFile(filename, options, plugins):
                 if options.csv:
                     if score >= options.minimumscore:
                         Print(MakeCSVLine((('%s', filename), ('%s', cPlugin.name), ('%.02f', score))), options)
+                elif options.json:
+                    if score >= options.minimumscore:
+                        try:
+                            plugin_data = {
+                                    '%s score' % (cPlugin.name): score,
+                                    '%s instructions' % (cPlugin.name): oPlugin.Instructions(score)
+                                }
+                        except AttributeError:
+                            plugin_data = {
+                                    '%s score' % (cPlugin.name): score
+                                }
+                        plugins_data.append(plugin_data.copy())
+
                 else:
                     if score >= options.minimumscore:
                         Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
@@ -795,9 +834,20 @@ def ProcessFile(filename, options, plugins):
                         Print(MakeCSVLine((('%s', filename), ('%s', cPlugin.name), ('%s', 'Error occured'))), options)
                     if not oPDFiD.isPDF:
                         Print(MakeCSVLine((('%s', filename), ('%s', cPlugin.name), ('%s', 'Not a PDF document'))), options)
+                if options.json:
+                    error = {}
+                    if oPDFiD.errorOccured:
+                        error["error"] = (('%s', filename), ('%s', cPlugin.name), ('%s', 'Error occured'))
+                    if not oPDFiD.isPDF:
+                        error["error"] = (('%s', filename), ('%s', cPlugin.name), ('%s', 'Not a PDF document'))
+                    plugins_data.append(error.copy())
                 else:
                     Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
-
+        # Merge plugin data into single json
+        if options.json:
+            base_info_dict = json.loads(PDFiD2JSON(xmlDoc, options.force))
+            base_info_dict["plugin_data"] = plugins_data
+            Print(json.dumps(base_info_dict), options)
 
 def Scan(directory, options, plugins):
     try:
@@ -852,7 +902,7 @@ def PDFiD2JSON(xmlDoc, force):
         dates.append(date)
 
     data = { 'countEof':countEof, 'countChatAfterLastEof':countChatAfterLastEof, 'totalEntropy':totalEntropy, 'streamEntropy':streamEntropy, 'nonStreamEntropy':nonStreamEntropy, 'errorOccured':errorOccured, 'errorMessage':errorMessage, 'filename':filename, 'header':header, 'isPdf':isPdf, 'version':version, 'entropy':entropy, 'keywords': { 'keyword': keywords }, 'dates': { 'date':dates} }
-    complete = [ { 'pdfid' : data} ]
+    complete = { 'pdfid' : data}
     result = json.dumps(complete)
     return result
 
@@ -1035,6 +1085,7 @@ https://DidierStevens.com'''
     oParser.add_option('-S', '--select', type=str, default='', help='selection expression')
     oParser.add_option('-n', '--nozero', action='store_true', default=False, help='supress output for counts equal to zero')
     oParser.add_option('-o', '--output', type=str, default='', help='output to log file')
+    oParser.add_option('-j', '--json', action='store_true', default=False, help='output in JSON format. Stored into file and printed.')
     oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
     oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='take filenames literally, no wildcard matching')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')

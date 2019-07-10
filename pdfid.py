@@ -714,25 +714,27 @@ class cPDFiD():
         self.xfa = self.keywords['/XFA']
         self.colors_gt_2_24 = self.keywords['/Colors > 2^24']
 
-def Print(lines, options):
+def Print(lines, options, sample_path=None, error=False):
     if options.json:
         # In addition of creating the file, add SHA256 meta information for results
         # make directory pdfid-json for output files
         dirName = options.json
+        json_load = lines
         if not os.path.exists(dirName):
             os.mkdir(dirName)
-        json_load = json.loads(lines)
-        # sample_filename = os.path.basename(json_load.get("pdfid").get("filename"))
-        sample_path = json_load.get("pdfid").get("filename")
         with open(sample_path, "rb",
                 buffering=0) as f:
             bytes = f.read()  # read entire file as bytes
             readable_hash = hashlib.sha256(bytes).hexdigest()
-        json_load["pdfid"]["FileSHA256"] = readable_hash
-        output_filename = "pdfidSHA256-%s.json" % readable_hash
+        if error:
+            print(lines)
+            output_filename = "error_pdfidSHA256-%s.json" % readable_hash
+        else:
+            json_load["pdfid"]["FileSHA256"] = readable_hash
+            output_filename = "pdfidSHA256-%s.json" % readable_hash
         json_outputfile = open(os.path.join(dirName, output_filename), "w")
         json_outputfile.write(json.dumps(json_load, indent=4))
-        print("Result file %s generated." % output_filename)
+        print("File %s generated." % output_filename)
         return
     print(lines)
     filename = None
@@ -763,7 +765,7 @@ def ProcessFile(filename, options, plugins):
         Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
         return
     if plugins == [] and options.select == '' and options.json:
-        Print(PDFiD2JSON(xmlDoc, options.force), options)
+        Print(PDFiD2JSON(xmlDoc, options.force), options, filename)
         return
 
     oPDFiD = cPDFiD(xmlDoc, options.force)
@@ -781,7 +783,7 @@ def ProcessFile(filename, options, plugins):
                 if options.csv and not options.json:
                     Print(filename, options)
                 elif options.json and not options.csv:
-                    Print(PDFiD2JSON(xmlDoc, options.force), options)
+                    Print(PDFiD2JSON(xmlDoc, options.force), options, filename)
                 else:
                     Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
     else:
@@ -791,7 +793,13 @@ def ProcessFile(filename, options, plugins):
                 try:
                     oPlugin = cPlugin(oPDFiD, options.pluginoptions)
                 except Exception as e:
-                    Print('Error instantiating plugin: %s' % cPlugin.name, options)
+                    if options.json:
+                        error = {}
+                        error["fileName"] = filename
+                        error["error"] = 'Error instantiating plugin: %s' % cPlugin.name
+                        Print(error, options, filename, error=True)
+                    else:
+                        Print('Error instantiating plugin: %s' % cPlugin.name, options)
                     if options.verbose:
                         raise e
                     return
@@ -799,7 +807,14 @@ def ProcessFile(filename, options, plugins):
                 try:
                     score = oPlugin.Score()
                 except Exception as e:
-                    Print('Error running plugin: %s' % cPlugin.name, options)
+                    if options.json:
+                        error = {}
+                        error["fileName"] = filename
+                        error["error"] = 'Error running plugin: %s' % cPlugin.name
+                        Print(error, options, filename, error=True)
+                        return
+                    else:
+                        Print('Error running plugin: %s' % cPlugin.name, options)
                     if options.verbose:
                         raise e
                     return
@@ -811,14 +826,17 @@ def ProcessFile(filename, options, plugins):
                     if score >= options.minimumscore:
                         try:
                             plugin_data = {
-                                    '%s score' % (cPlugin.name): score,
-                                    '%s instructions' % (cPlugin.name): oPlugin.Instructions(score)
-                                }
+                                'plugin_name': cPlugin.name,
+                                'score': score,
+                                'instructions': oPlugin.Instructions(score)
+                            }
                         except AttributeError:
                             plugin_data = {
-                                    '%s score' % (cPlugin.name): score
-                                }
-                        plugins_data.append(plugin_data.copy())
+                                'plugin_name': cPlugin.name,
+                                'score': score
+                            }
+                        finally:
+                            plugins_data.append(plugin_data.copy())
 
                 else:
                     if score >= options.minimumscore:
@@ -843,11 +861,11 @@ def ProcessFile(filename, options, plugins):
                     plugins_data.append(error.copy())
                 else:
                     Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
-        # Merge plugin data into single json
+        # Merge plugin data into single dict
         if options.json:
-            base_info_dict = json.loads(PDFiD2JSON(xmlDoc, options.force))
+            base_info_dict = PDFiD2JSON(xmlDoc, options.force)
             base_info_dict["plugin_data"] = plugins_data
-            Print(json.dumps(base_info_dict), options)
+            Print(base_info_dict, options, filename)
 
 def Scan(directory, options, plugins):
     try:
@@ -883,28 +901,31 @@ def PDFiD2JSON(xmlDoc, force):
     keywords = []
     dates = []
 
+
+    if xmlDoc.documentElement.getElementsByTagName('Keywords'):
     #grab all keywords
-    for node in xmlDoc.documentElement.getElementsByTagName('Keywords')[0].childNodes:
-        name = node.getAttribute('Name')
-        count = int(node.getAttribute('Count'))
-        if int(node.getAttribute('HexcodeCount')) > 0:
-            hexCount = int(node.getAttribute('HexcodeCount'))
-        else:
-            hexCount = 0
-        keyword = { 'count':count, 'hexcodecount':hexCount, 'name':name }
-        keywords.append(keyword)
+        for node in xmlDoc.documentElement.getElementsByTagName('Keywords')[0].childNodes:
+            name = node.getAttribute('Name')
+            count = int(node.getAttribute('Count'))
+            if int(node.getAttribute('HexcodeCount')) > 0:
+                hexCount = int(node.getAttribute('HexcodeCount'))
+            else:
+                hexCount = 0
+            keyword = { 'count':count, 'hexcodecount':hexCount, 'name':name }
+            keywords.append(keyword)
 
     #grab all date information
-    for node in xmlDoc.documentElement.getElementsByTagName('Dates')[0].childNodes:
-        name = node.getAttribute('Name')
-        value = node.getAttribute('Value')
-        date = { 'name':name, 'value':value }
-        dates.append(date)
+    if xmlDoc.documentElement.getElementsByTagName('Dates'):
+        for node in xmlDoc.documentElement.getElementsByTagName('Dates')[0].childNodes:
+            name = node.getAttribute('Name')
+            value = node.getAttribute('Value')
+            date = { 'name':name, 'value':value }
+            dates.append(date)
 
     data = { 'countEof':countEof, 'countChatAfterLastEof':countChatAfterLastEof, 'totalEntropy':totalEntropy, 'streamEntropy':streamEntropy, 'nonStreamEntropy':nonStreamEntropy, 'errorOccured':errorOccured, 'errorMessage':errorMessage, 'filename':filename, 'header':header, 'isPdf':isPdf, 'version':version, 'entropy':entropy, 'keywords': { 'keyword': keywords }, 'dates': { 'date':dates} }
     complete = { 'pdfid' : data}
-    result = json.dumps(complete)
-    return result
+    # result = json.dumps(complete)
+    return complete
 
 def File2Strings(filename):
     try:

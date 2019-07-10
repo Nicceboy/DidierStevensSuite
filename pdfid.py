@@ -718,7 +718,7 @@ def Print(lines, options):
     if options.json:
         # In addition of creating the file, add SHA256 meta information for results
         # make directory pdfid-json for output files
-        dirName = 'pdfid-json'
+        dirName = options.json
         if not os.path.exists(dirName):
             os.mkdir(dirName)
         json_load = json.loads(lines)
@@ -759,10 +759,10 @@ def MakeCSVLine(fields, separator=';', quote='"'):
 def ProcessFile(filename, options, plugins):
     xmlDoc = PDFiD(filename, options.all, options.extra, options.disarm, options.force)
 
-    if plugins == [] and options.select == '' and options.json is False:
+    if plugins == [] and options.select == '' and not options.json:
         Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
         return
-    if plugins == [] and options.select == '' and options.json is True:
+    if plugins == [] and options.select == '' and options.json:
         Print(PDFiD2JSON(xmlDoc, options.force), options)
         return
 
@@ -1085,7 +1085,7 @@ https://DidierStevens.com'''
     oParser.add_option('-S', '--select', type=str, default='', help='selection expression')
     oParser.add_option('-n', '--nozero', action='store_true', default=False, help='supress output for counts equal to zero')
     oParser.add_option('-o', '--output', type=str, default='', help='output to log file')
-    oParser.add_option('-j', '--json', action='store_true', default=False, help='output in JSON format. Stored into file and printed.')
+    oParser.add_option('-j', '--json', type=str, default=False, help='output in JSON format as file(s). Requires destination folder.')
     oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
     oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='take filenames literally, no wildcard matching')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')

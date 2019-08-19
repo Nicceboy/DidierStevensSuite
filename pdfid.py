@@ -731,7 +731,7 @@ def Print(lines, options, sample_path=None, error=False):
             output_filename = "error_pdfidSHA256-%s.json" % readable_hash
         else:
             json_load["pdfid"]["FileSHA256"] = readable_hash
-            output_filename = "pdfidSHA256-%s.json" % readable_hash
+            output_filename = "pdfid_%s.json" % readable_hash
         json_outputfile = open(os.path.join(dirName, output_filename), "w")
         json_outputfile.write(json.dumps(json_load, indent=4))
         print("File %s generated." % output_filename)
